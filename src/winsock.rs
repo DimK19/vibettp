@@ -112,68 +112,80 @@ pub fn run_server() {
 
         // --- Step 6: Accept a client connection ---
 
-        // Prepare a buffer to receive the client's address upon connection.
-        let mut client_addr: SOCKADDR_IN = zeroed();
-        let mut addr_len = size_of::<SOCKADDR_IN>() as i32;
+        // Loop forever to handle one connection at a time.
+        loop {
+            // Prepare a buffer to receive the client's address upon connection.
+            let mut client_addr: SOCKADDR_IN = zeroed();
+            let mut addr_len = size_of::<SOCKADDR_IN>() as i32;
 
-        // Block and wait for an incoming connection.
-        // Returns a new socket specific to the client.
-        let client_sock = accept(
-            sock,
-            &mut client_addr as *mut _ as *mut SOCKADDR,
-            &mut addr_len,
-        );
-
-        // Error handling if accept fails.
-        if client_sock == INVALID_SOCKET {
-            eprintln!("Accept failed");
-            closesocket(sock);
-            WSACleanup();
-            return;
-        }
-
-        // --- Step 7: Read from client ---
-
-        // Create a 1024-byte raw buffer to receive data from the incoming request.
-        let mut buffer = [0u8; 1024];
-
-        // Read bytes into the buffer from the client socket.
-        // Returns the number of bytes read.
-        let bytes_received = recv(
-            client_sock,
-            buffer.as_mut_ptr(),
-            buffer.len() as i32,
-            0,
-        );
-
-        // If data was received, decode and print the raw HTTP request from the client.
-        if bytes_received > 0 {
-            // Convert request to string and print it
-            println!(
-                "Received:\n{}",
-                String::from_utf8_lossy(&buffer[..bytes_received as usize])
+            // Block and wait for an incoming connection.
+            // Returns a new socket specific to the client.
+            let client_sock = accept(
+                sock,
+                &mut client_addr as *mut _ as *mut SOCKADDR,
+                &mut addr_len,
             );
 
-            // --- Step 8: Build and send HTTP response ---
+            // Error handling if accept fails.
+            if client_sock == INVALID_SOCKET {
+                eprintln!("Accept failed");
+                closesocket(sock);
+                WSACleanup();
+                return;
+            }
 
-            // Create the HTTP response body using the helper function.
-            let response = build_response();
+            println!("📡 Client connected.");
 
-            // Send the response over the client socket.
-            send(
+            // --- Step 7: Read from client ---
+
+            // Create a 1024-byte raw buffer to receive data from the incoming request.
+            let mut buffer = [0u8; 1024];
+
+            // Read bytes into the buffer from the client socket.
+            // Returns the number of bytes read.
+            let bytes_received = recv(
                 client_sock,
-                response.as_ptr(),
-                response.len() as i32,
+                buffer.as_mut_ptr(),
+                buffer.len() as i32,
                 0,
             );
+
+            // If data was received, decode and print the raw HTTP request from the client.
+            if bytes_received > 0 {
+                // Convert request to string and print it
+                println!(
+                    "Received:\n{}",
+                    String::from_utf8_lossy(&buffer[..bytes_received as usize])
+                );
+
+                // --- Step 8: Build and send HTTP response ---
+
+                // Create the HTTP response body using the helper function.
+                let response = build_response();
+
+                // Send the response over the client socket.
+                send(
+                    client_sock,
+                    response.as_ptr(),
+                    response.len() as i32,
+                    0,
+                );
+            }
+
+            // Close client connection.
+            closesocket(client_sock);
+            println!("🔌 Connection closed.\n");
         }
 
         // --- Step 9: Clean up sockets and Winsock ---
 
         // Close both client and server sockets.
         // Cleanup WinSock (equivalent to shutting down the library).
+        // (never reached in this loop, but good practice for future shutdown logic)
+        /*
         closesocket(client_sock);
         closesocket(sock);
         WSACleanup();
+        */
     }
 }
