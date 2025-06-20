@@ -1,0 +1,14 @@
+use crate::response::build_response;
+
+pub fn home() -> Vec<u8> {
+    // A fixed HTTP 200 OK response with simple HTML body
+    build_response(200, "OK", "text/html", "<h1>Welcome home!</h1>")
+}
+
+pub fn about() -> Vec<u8> {
+    build_response(200, "OK", "text/html", "<h1>About us</h1>")
+}
+
+pub fn not_found() -> Vec<u8> {
+    build_response(404, "Not Found", "text/plain", "404 Not Found")
+}

@@ -2,6 +2,7 @@
 pub struct Request {
     pub method: String,
     pub path: String,
+    pub version: String,
 }
 
 // Parses a raw HTTP request buffer into a Request struct.
@@ -47,9 +48,10 @@ pub fn parse_request(buffer: &[u8]) -> Option<Request> {
         let mut parts = request_line.split_whitespace();
         let method = parts.next()?.to_string();
         let path = parts.next()?.to_string();
+        let version = parts.next()?.to_string();
 
         // Return a populated Request struct if successful.
-        return Some(Request { method, path });
+        return Some(Request { method, path, version });
     }
 
     /*

@@ -3,6 +3,7 @@ mod winsock;
 mod util;
 mod response;
 mod request;
+mod handlers;
 
 use winsock::run_server;
 

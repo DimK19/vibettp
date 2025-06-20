@@ -23,6 +23,9 @@ use crate::util::htons;
 // Import the function that parses a request to extract method and path.
 use crate::request::parse_request;
 
+use std::collections::HashMap;
+use crate::handlers;
+
 // Entry point for the raw TCP server logic. Called by main.rs
 pub fn run_server() {
     // Unsafe block. Required for raw C-style FFI (Foreign Function Interface) work.
@@ -111,7 +114,12 @@ pub fn run_server() {
         }
 
         // Inform user that the server is live.
-        println!("Listening on 127.0.0.1:7878...");
+        println!("🌐 Listening on 127.0.0.1:7878...");
+
+        // Set up routing table
+        let mut routes: HashMap<&str, fn() -> Vec<u8>> = HashMap::new();
+        routes.insert("/", handlers::home);
+        routes.insert("/about", handlers::about);
 
         // --- Step 6: Accept a client connection ---
 
@@ -157,30 +165,38 @@ pub fn run_server() {
             if bytes_received > 0 {
                 // Convert request to string, parse, and print it
                 // Print the raw request for inspection.
+                let request_data = &buffer[..bytes_received as usize];
                 println!(
                     "🔍 Raw request:\n{}",
                     String::from_utf8_lossy(request_data)
                 );
-                let request_data = &buffer[..bytes_received as usize];
+
                 if let Some(req) = parse_request(request_data) {
-                    println!("👉 Method: {}, Path: {}", req.method, req.path);
+                    println!(
+                        "📠 HTTP Version: {} Method: {}, Path: {}",
+                        req.version, req.method, req.path
+                    );
+
+                    // --- Step 8: Build and send HTTP response ---
+
+                    // Get the appropriate handler function
+                    let handler = routes.get(req.path.as_str())
+                                        .unwrap_or(&(handlers::not_found as fn() -> Vec<u8>));
+
+                    // Create the HTTP response body using the helper function.
+                    let response = handler();
+
+                    // Send the response over the client socket.
+                    send(
+                        client_sock,
+                        response.as_ptr(),
+                        response.len() as i32,
+                        0,
+                    );
                 }
                 else {
                     println!("⚠️ Failed to parse HTTP request.");
                 }
-
-                // --- Step 8: Build and send HTTP response ---
-
-                // Create the HTTP response body using the helper function.
-                let response = build_response();
-
-                // Send the response over the client socket.
-                send(
-                    client_sock,
-                    response.as_ptr(),
-                    response.len() as i32,
-                    0,
-                );
             }
 
             // Close client connection.
