@@ -20,6 +20,9 @@ use crate::response::build_response;
 // Import a helper from util.rs to convert a port number to network byte order (required by WinSock).
 use crate::util::htons;
 
+// Import the function that parses a request to extract method and path.
+use crate::request::parse_request;
+
 // Entry point for the raw TCP server logic. Called by main.rs
 pub fn run_server() {
     // Unsafe block. Required for raw C-style FFI (Foreign Function Interface) work.
@@ -152,11 +155,19 @@ pub fn run_server() {
 
             // If data was received, decode and print the raw HTTP request from the client.
             if bytes_received > 0 {
-                // Convert request to string and print it
+                // Convert request to string, parse, and print it
+                // Print the raw request for inspection.
                 println!(
-                    "Received:\n{}",
-                    String::from_utf8_lossy(&buffer[..bytes_received as usize])
+                    "🔍 Raw request:\n{}",
+                    String::from_utf8_lossy(request_data)
                 );
+                let request_data = &buffer[..bytes_received as usize];
+                if let Some(req) = parse_request(request_data) {
+                    println!("👉 Method: {}, Path: {}", req.method, req.path);
+                }
+                else {
+                    println!("⚠️ Failed to parse HTTP request.");
+                }
 
                 // --- Step 8: Build and send HTTP response ---
 
