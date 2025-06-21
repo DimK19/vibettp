@@ -12,3 +12,7 @@ pub fn about() -> Vec<u8> {
 pub fn not_found() -> Vec<u8> {
     build_response(404, "Not Found", "text/plain", "404 Not Found")
 }
+
+pub fn bad_request() -> Vec<u8> {
+    build_response(400, "Bad Request", "text/plain", "400 Bad Request")
+}

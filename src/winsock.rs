@@ -18,7 +18,7 @@ use windows_sys::Win32::Networking::WinSock::{
 use crate::response::build_response;
 
 // Import a helper from util.rs to convert a port number to network byte order (required by WinSock).
-use crate::util::htons;
+use crate::util::{htons, sanitize_path};
 
 // Import the function that parses a request to extract method and path.
 use crate::request::parse_request;
@@ -172,27 +172,64 @@ pub fn run_server() {
                 );
 
                 if let Some(req) = parse_request(request_data) {
+                    // --- Step 8: Build and send HTTP response ---
+
                     println!(
                         "📠 HTTP Version: {} Method: {}, Path: {}",
                         req.version, req.method, req.path
                     );
 
-                    // --- Step 8: Build and send HTTP response ---
+                    println!("{:?}", sanitize_path(&req.path));
 
+                    // Try route match first
                     // Get the appropriate handler function
-                    let handler = routes.get(req.path.as_str())
-                                        .unwrap_or(&(handlers::not_found as fn() -> Vec<u8>));
+                    if let Some(handler) = routes.get(req.path.as_str()) {
+                        // Create the HTTP response body using the helper function.
+                        let response = handler();
 
-                    // Create the HTTP response body using the helper function.
-                    let response = handler();
-
-                    // Send the response over the client socket.
-                    send(
-                        client_sock,
-                        response.as_ptr(),
-                        response.len() as i32,
-                        0,
-                    );
+                        // Send the response over the client socket.
+                        send(
+                            client_sock,
+                            response.as_ptr(),
+                            response.len() as i32,
+                            0,
+                        );
+                    }
+                    // Fallback to static file serving
+                    else if let Some(safe_path) = sanitize_path(&req.path) {
+                        if let Ok(contents) = std::fs::read(&safe_path) {
+                            let body = std::str::from_utf8(&contents).unwrap_or("Invalid UTF-8 in file");
+                            let response = build_response(200, "OK", "text/html", body);
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0,
+                            );
+                        }
+                        else {
+                            let response = handlers::not_found();
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0,
+                            );
+                        }
+                    }
+                    // Malicious path or error
+                    else {
+                        let response = handlers::bad_request();
+                        send(
+                            client_sock,
+                            response.as_ptr(),
+                            response.len() as i32,
+                            0
+                        );
+                        closesocket(client_sock);
+                        println!("🔌 Connection closed.\n");
+                        continue;
+                    }
                 }
                 else {
                     println!("⚠️ Failed to parse HTTP request.");
