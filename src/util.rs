@@ -44,7 +44,15 @@ So: requested = ../etc/passwd ← user is trying to escape!
 
 */
 pub fn sanitize_path(url_path: &str) -> Option<PathBuf> {
-    println!("Inside sanitize_path!");
+    println!("🔍 Entered sanitize_path()");
+    println!("📥 Raw URL path: {:?}", url_path);
+
+    // Disallow backslashes (Windows-specific), null bytes, or path traversal
+    if url_path.contains("..") || url_path.contains('\\') || url_path.contains('\0') {
+        println!("⛔️ Rejected: Malicious characters found.");
+        return None;
+    }
+
     /*
     trim_start_matches('/') removes the leading slash from the path
     (e.g. "/about.html" → "about.html"). This is necessary because Path::new("/about.html")
@@ -53,7 +61,7 @@ pub fn sanitize_path(url_path: &str) -> Option<PathBuf> {
     requested might now be "index.html" or "images/logo.png".
     */
     let requested = Path::new(url_path.trim_start_matches('/'));
-    return requested;
+    println!("📂 Cleaned relative path: {:?}", requested);
 
     /*
     Prepend the public/ directory to whatever the user requested.
@@ -77,8 +85,27 @@ pub fn sanitize_path(url_path: &str) -> Option<PathBuf> {
     /*
     Canonize the trusted root directory (public/) to get its absolute path.
     For example: C:\project\public.
+    Path::new("public").canonicalize() fails — likely because the "public" directory does
+    not exist, and .canonicalize() silently returns None via .ok()?, exiting the function early.
+    .ok()? returns None without panicking or printing if the directory doesn't exist
+    or is inaccessible. Why this happens:
+    Rust’s design leans heavily on the idea that, if you don’t want to handle the error,
+    then the caller should. But .ok()? is especially bad because it converts a Result into an
+    Option and then silently exits. That’s often the opposite of what you want in a debug or
+    server scenario, where visibility is critical. Rust gives you tools to make these things
+    explicit (match, if let Err(e), etc.), but it defaults to implicit behaviour that can be painful.
     */
-    let base = Path::new("public").canonicalize().ok()?;
+    // let base = Path::new("C:\\Users\\KYRIAKOS\\Desktop").canonicalize().ok()?;
+    let base = match Path::new("C:\\Users\\KYRIAKOS\\Desktop").canonicalize() {
+        Ok(path) => {
+            println!("🛡 Canonical base dir: {:?}", path);
+            path // Cannot be return path; here because this is the result of match
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to canonicalize base directory: {}", e);
+            return None;
+        }
+    };
 
     /*
     Join and normalize the full target path without requiring existence
@@ -122,15 +149,35 @@ pub fn sanitize_path(url_path: &str) -> Option<PathBuf> {
     ALLOWED
     */
     let normalized = base.join(requested).components().collect::<PathBuf>();
-    println!("{:?}", &base);
-    println!("{:?}", &normalized);
+    println!("📌 Normalized full path: {:?}", normalized);
     /*
     Check if the requested path is inside the public/ directory.
     Prevent directory traversal attacks like ../../etc/passwd, which would escape the base dir.
     */
     if normalized.starts_with(&base) {
+        println!("✅ Safe: Path is within base.");
         return Some(normalized);
     } else {
+        println!("🚫 Unsafe: Path escapes base.");
         return None;
     }
+
+    /*
+    📠 HTTP Version: HTTP/1.1 Method: GET, Path: /hello
+    🔍 Entered sanitize_path()
+    📥 Raw URL path: "/hello"
+    📂 Cleaned relative path: "hello"
+    🛡 Canonical base dir: "\\\\?\\C:\\Users\\KYRIAKOS\\Desktop"
+    📌 Normalized full path: "\\\\?\\C:\\Users\\KYRIAKOS\\Desktop\\hello"
+    ✅ Safe: Path is within base.
+    🔌 Connection closed.
+
+    What is the junk before C:\\ in the paths?
+    That \\?\ prefix is not junk — it’s a Windows “verbatim path prefix”.
+    It tells the Windows API to disable all path normalization rules like interpreting ..,
+    collapsing //, or parsing C:/ differently.
+    It allows very long paths (over 260 characters).
+    You’ll see this when calling Path::canonicalize() on Windows — it's how Rust (via stdlib)
+    safely interacts with the Win32 API.
+    */
 }
