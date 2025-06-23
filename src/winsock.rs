@@ -26,6 +26,9 @@ use crate::request::parse_request;
 use std::collections::HashMap;
 use crate::handlers;
 
+const MAX_REQUEST_SIZE: usize = 8196; // 8KB
+// const MAX_BODY_SIZE: usize = 6144; // 6KB (request line ~ 100B, headers ~ 1-2KB)
+
 // Entry point for the raw TCP server logic. Called by main.rs
 pub fn run_server() {
     // Unsafe block. Required for raw C-style FFI (Foreign Function Interface) work.
@@ -149,8 +152,8 @@ pub fn run_server() {
 
             // --- Step 7: Read from client ---
 
-            // Create a 1024-byte raw buffer to receive data from the incoming request.
-            let mut buffer = [0u8; 1024];
+            // Create a 8196-byte raw buffer to receive data from the incoming request.
+            let mut buffer = [0u8; MAX_REQUEST_SIZE];
 
             // Read bytes into the buffer from the client socket.
             // Returns the number of bytes read.
@@ -160,6 +163,43 @@ pub fn run_server() {
                 buffer.len() as i32,
                 0,
             );
+
+            /*
+            recv() pulls up to N bytes (N is the buffer size, in this case 8196).
+            If the client sent more, the first N bytes are copied into the buffer, and the
+            remaining data stays queued in the socket’s internal receive buffer, managed by the
+            operating system. This data will be returned by the next recv() call.
+
+            Where is that data exactly?
+            The OS keeps a receive queue (buffer) per socket. It typically has a size limit
+            (e.g., 64KB or more depending on OS settings). Until you call recv() again, the data
+            sits there. If you never call recv() again and just close the socket, the OS drops the
+            remaining data.
+            */
+
+            // Impose limit on request size
+            if bytes_received == MAX_REQUEST_SIZE as i32 {
+                // Suspicious: buffer is completely full
+                // Could mean there is more data — reject just to be safe
+                let response = handlers::content_too_large();
+                send(
+                    client_sock,
+                    response.as_ptr(),
+                    response.len() as i32,
+                    0,
+                );
+                closesocket(client_sock);
+                println!("🔌 Connection closed.\n");
+                continue;
+            }
+
+            /*
+            | Behavior                      | Valid Practice| Notes                               |
+            | ----------------------------- | ------------- | ----------------------------------- |
+            | Reject if recv() == buf.len() | Yes           | Defensive and efficient             |
+            | Try to read more chunks       | Risky         | Slower, invites abuse unless capped |
+            | Trust Content-Length header   | Dangerous     | Headers can lie or be omitted       |
+            */
 
             // If data was received, decode and print the raw HTTP request from the client.
             if bytes_received > 0 {
@@ -192,7 +232,6 @@ pub fn run_server() {
                         println!("🔌 Connection closed.\n");
                         continue;
                     }
-
 
                     // Try route match first
                     // Get the appropriate handler function
