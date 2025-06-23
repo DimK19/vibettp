@@ -179,6 +179,21 @@ pub fn run_server() {
                         req.version, req.method, req.path
                     );
 
+                    // Block disallowed methods
+                    if req.method.as_str() != "GET" && req.method.as_str() != "POST" {
+                        let response = handlers::method_not_allowed();
+                        send(
+                            client_sock,
+                            response.as_ptr(),
+                            response.len() as i32,
+                            0,
+                        );
+                        closesocket(client_sock);
+                        println!("🔌 Connection closed.\n");
+                        continue;
+                    }
+
+
                     // Try route match first
                     // Get the appropriate handler function
                     if let Some(handler) = routes.get(req.path.as_str()) {
@@ -195,7 +210,7 @@ pub fn run_server() {
                     }
                     // Fallback to static file serving
                     else if let Some(safe_path) = sanitize_path(&req.path) {
-                        if let Ok(contents) = std::fs::read(&req.path) {
+                        if let Ok(contents) = std::fs::read(&safe_path) {
                             let body = std::str::from_utf8(&contents).unwrap_or("Invalid UTF-8 in file");
                             let response = build_response(200, "OK", "text/html", body);
                             send(

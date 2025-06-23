@@ -16,3 +16,7 @@ pub fn not_found() -> Vec<u8> {
 pub fn bad_request() -> Vec<u8> {
     build_response(400, "Bad Request", "text/plain", "400 Bad Request")
 }
+
+pub fn method_not_allowed() -> Vec<u8> {
+    build_response(405, "Method Not Allowed", "text/plain", "405 Method Not Allowed")
+}
