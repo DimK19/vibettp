@@ -1,9 +1,21 @@
 use std::path::{Path, PathBuf};
+use serde::Deserialize;
+use std::fs;
 
 // Converts a u16 port number to network byte order (big endian)
 // htons = "host to network short"
 pub fn htons(port: u16) -> u16 {
     port.to_be()
+}
+
+/*
+#[derive(Deserialize)] is a Rust attribute macro that tells the compiler to automatically
+generate code to allow a struct to be deserialized — in this case, from a format like TOML,
+JSON, YAML, etc. Used to load structured data (like TOML) into Rust structs.
+*/
+#[derive(Deserialize)]
+struct Config {
+    root_directory: String,
 }
 
 /*
@@ -96,7 +108,11 @@ pub fn sanitize_path(url_path: &str) -> Option<PathBuf> {
     explicit (match, if let Err(e), etc.), but it defaults to implicit behaviour that can be painful.
     */
     // let base = Path::new("C:\\Users\\KYRIAKOS\\Desktop").canonicalize().ok()?;
-    let base = match Path::new("C:\\Users\\KYRIAKOS\\Desktop").canonicalize() {
+    let raw = fs::read_to_string("config.toml").expect("❌ Failed to read config file");
+    let config: Config = toml::from_str(&raw).expect("❌ Failed to parse config");
+
+    println!("📂 Root directory: {}", config.root_directory);
+    let base = match Path::new(&config.root_directory).canonicalize() {
         Ok(path) => {
             println!("🛡 Canonical base dir: {:?}", path);
             path // Cannot be return path; here because this is the result of match

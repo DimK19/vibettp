@@ -8,3 +8,12 @@ version = "0.59"
 features = [
   "Win32_Networking_WinSock"
 ]
+
+[dependencies.serde]
+version = "1.0.219"
+features = [
+  "derive"
+]
+
+[dependencies]
+toml = "0.8.23"
