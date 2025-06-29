@@ -2,6 +2,8 @@
 // zeroed: Creates a zero-initialized instance of a struct (common for FFI where padding must be 0).
 use std::mem::{size_of, zeroed};
 
+use std::fs;
+
 // null_mut: Used to pass a null (null pointer) to C-style functions that expect optional parameters or indicate error.
 use std::ptr::null_mut;
 
@@ -25,12 +27,17 @@ use crate::request::parse_request;
 
 use std::collections::HashMap;
 use crate::handlers;
+use crate::config::Config;
 
 const MAX_REQUEST_SIZE: usize = 8196; // 8KB
 // const MAX_BODY_SIZE: usize = 6144; // 6KB (request line ~ 100B, headers ~ 1-2KB)
 
 // Entry point for the raw TCP server logic. Called by main.rs
 pub fn run_server() {
+
+    let raw = fs::read_to_string("config.toml").expect("❌ Failed to read config file");
+    let config: Config = toml::from_str(&raw).expect("❌ Failed to parse config");
+
     // Unsafe block. Required for raw C-style FFI (Foreign Function Interface) work.
     unsafe {
         // Everything inside here could violate Rust’s safety guarantees if misused.
@@ -152,106 +159,96 @@ pub fn run_server() {
 
             // --- Step 7: Read from client ---
 
-            // Create a 8196-byte raw buffer to receive data from the incoming request.
-            let mut buffer = [0u8; MAX_REQUEST_SIZE];
+            // --- Begin keep-alive-aware inner loop ---
+            'client_loop: loop {
+                // Create a 8196-byte raw buffer to receive data from the incoming request.
+                let mut buffer = [0u8; MAX_REQUEST_SIZE];
 
-            // Read bytes into the buffer from the client socket.
-            // Returns the number of bytes read.
-            let bytes_received = recv(
-                client_sock,
-                buffer.as_mut_ptr(),
-                buffer.len() as i32,
-                0,
-            );
-
-            /*
-            recv() pulls up to N bytes (N is the buffer size, in this case 8196).
-            If the client sent more, the first N bytes are copied into the buffer, and the
-            remaining data stays queued in the socket’s internal receive buffer, managed by the
-            operating system. This data will be returned by the next recv() call.
-
-            Where is that data exactly?
-            The OS keeps a receive queue (buffer) per socket. It typically has a size limit
-            (e.g., 64KB or more depending on OS settings). Until you call recv() again, the data
-            sits there. If you never call recv() again and just close the socket, the OS drops the
-            remaining data.
-            */
-
-            // Impose limit on request size
-            if bytes_received == MAX_REQUEST_SIZE as i32 {
-                // Suspicious: buffer is completely full
-                // Could mean there is more data — reject just to be safe
-                let response = handlers::content_too_large();
-                send(
+                // Read bytes into the buffer from the client socket.
+                // Returns the number of bytes read.
+                let bytes_received = recv(
                     client_sock,
-                    response.as_ptr(),
-                    response.len() as i32,
+                    buffer.as_mut_ptr(),
+                    buffer.len() as i32,
                     0,
                 );
-                closesocket(client_sock);
-                println!("🔌 Connection closed.\n");
-                continue;
-            }
+                let mut keep_alive_requested: bool = false;
 
-            /*
-            | Behavior                      | Valid Practice| Notes                               |
-            | ----------------------------- | ------------- | ----------------------------------- |
-            | Reject if recv() == buf.len() | Yes           | Defensive and efficient             |
-            | Try to read more chunks       | Risky         | Slower, invites abuse unless capped |
-            | Trust Content-Length header   | Dangerous     | Headers can lie or be omitted       |
-            */
+                /*
+                recv() pulls up to N bytes (N is the buffer size, in this case 8196).
+                If the client sent more, the first N bytes are copied into the buffer, and the
+                remaining data stays queued in the socket’s internal receive buffer, managed by the
+                operating system. This data will be returned by the next recv() call.
 
-            // If data was received, decode and print the raw HTTP request from the client.
-            if bytes_received > 0 {
-                // Convert request to string, parse, and print it
-                // Print the raw request for inspection.
-                let request_data = &buffer[..bytes_received as usize];
-                println!(
-                    "🔍 Raw request:\n{}",
-                    String::from_utf8_lossy(request_data)
-                );
+                Where is that data exactly?
+                The OS keeps a receive queue (buffer) per socket. It typically has a size limit
+                (e.g., 64KB or more depending on OS settings). Until you call recv() again, the data
+                sits there. If you never call recv() again and just close the socket, the OS drops the
+                remaining data.
+                */
 
-                if let Some(req) = parse_request(request_data) {
-                    // --- Step 8: Build and send HTTP response ---
+                // Impose limit on request size
+                if bytes_received == MAX_REQUEST_SIZE as i32 {
+                    // Suspicious: buffer is completely full
+                    // Could mean there is more data — reject just to be safe
+                    let response = handlers::content_too_large();
+                    send(
+                        client_sock,
+                        response.as_ptr(),
+                        response.len() as i32,
+                        0,
+                    );
+                    break 'client_loop;
+                }
 
+                /*
+                | Behavior                      | Valid Practice| Notes                               |
+                | ----------------------------- | ------------- | ----------------------------------- |
+                | Reject if recv() == buf.len() | Yes           | Defensive and efficient             |
+                | Try to read more chunks       | Risky         | Slower, invites abuse unless capped |
+                | Trust Content-Length header   | Dangerous     | Headers can lie or be omitted       |
+                */
+
+                // If data was received, decode and print the raw HTTP request from the client.
+                if bytes_received > 0 {
+                    // Convert request to string, parse, and print it
+                    // Print the raw request for inspection.
+                    let request_data = &buffer[..bytes_received as usize];
                     println!(
-                        "📠 HTTP Version: {} Method: {}, Path: {}",
-                        req.version, req.method, req.path
+                        "🔍 Raw request:\n{}",
+                        String::from_utf8_lossy(request_data)
                     );
 
-                    // Block disallowed methods
-                    if req.method.as_str() != "GET" && req.method.as_str() != "POST" {
-                        let response = handlers::method_not_allowed();
-                        send(
-                            client_sock,
-                            response.as_ptr(),
-                            response.len() as i32,
-                            0,
-                        );
-                        closesocket(client_sock);
-                        println!("🔌 Connection closed.\n");
-                        continue;
-                    }
 
-                    // Try route match first
-                    // Get the appropriate handler function
-                    if let Some(handler) = routes.get(req.path.as_str()) {
-                        // Create the HTTP response body using the helper function.
-                        let response = handler();
+                    if let Some(req) = parse_request(request_data) {
+                        // --- Step 8: Build and send HTTP response ---
 
-                        // Send the response over the client socket.
-                        send(
-                            client_sock,
-                            response.as_ptr(),
-                            response.len() as i32,
-                            0,
+                        println!(
+                            "📠 HTTP Version: {} Method: {}, Path: {}",
+                            req.version, req.method, req.path
                         );
-                    }
-                    // Fallback to static file serving
-                    else if let Some(safe_path) = sanitize_path(&req.path) {
-                        if let Ok(contents) = std::fs::read(&safe_path) {
-                            let body = std::str::from_utf8(&contents).unwrap_or("Invalid UTF-8 in file");
-                            let response = build_response(200, "OK", "text/html", body);
+
+                        keep_alive_requested = req.keep_alive;
+
+                        // Block disallowed methods
+                        if req.method.as_str() != "GET" && req.method.as_str() != "POST" {
+                            let response = handlers::method_not_allowed();
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0,
+                            );
+                            break 'client_loop;
+                        }
+
+                        // Try route match first
+                        // Get the appropriate handler function
+                        if let Some(handler) = routes.get(req.path.as_str()) {
+                            // Create the HTTP response body using the helper function.
+                            let response = handler();
+
+                            // Send the response over the client socket.
                             send(
                                 client_sock,
                                 response.as_ptr(),
@@ -259,49 +256,61 @@ pub fn run_server() {
                                 0,
                             );
                         }
+                        // Fallback to static file serving
+                        else if let Some(safe_path) = sanitize_path(&req.path) {
+                            if let Ok(contents) = std::fs::read(&safe_path) {
+                                let body = std::str::from_utf8(&contents).unwrap_or("Invalid UTF-8 in file");
+                                let response = build_response(200, "OK", "text/html", body);
+                                send(
+                                    client_sock,
+                                    response.as_ptr(),
+                                    response.len() as i32,
+                                    0,
+                                );
+                            }
+                            else {
+                                let response = handlers::not_found();
+                                send(
+                                    client_sock,
+                                    response.as_ptr(),
+                                    response.len() as i32,
+                                    0,
+                                );
+                            }
+                        }
+                        // Malicious path or error
                         else {
-                            let response = handlers::not_found();
+                            let response = handlers::bad_request();
                             send(
                                 client_sock,
                                 response.as_ptr(),
                                 response.len() as i32,
-                                0,
+                                0
                             );
+                            continue 'client_loop;
                         }
                     }
-                    // Malicious path or error
                     else {
-                        let response = handlers::bad_request();
-                        send(
-                            client_sock,
-                            response.as_ptr(),
-                            response.len() as i32,
-                            0
-                        );
-                        closesocket(client_sock);
-                        println!("🔌 Connection closed.\n");
-                        continue;
+                        println!("⚠️ Failed to parse HTTP request.");
                     }
                 }
-                else {
-                    println!("⚠️ Failed to parse HTTP request.");
+
+                // Close client connection.
+                if !config.keep_alive || !keep_alive_requested {
+                    break 'client_loop;
                 }
             }
 
-            // Close client connection.
+            // --- Step 9: Clean up sockets and Winsock ---
+
+            // Close both client and server sockets.
+            // Cleanup WinSock (equivalent to shutting down the library).
+            // (never reached in this loop, but good practice for future shutdown logic)
+
             closesocket(client_sock);
             println!("🔌 Connection closed.\n");
         }
 
-        // --- Step 9: Clean up sockets and Winsock ---
-
-        // Close both client and server sockets.
-        // Cleanup WinSock (equivalent to shutting down the library).
-        // (never reached in this loop, but good practice for future shutdown logic)
-        /*
-        closesocket(client_sock);
-        closesocket(sock);
         WSACleanup();
-        */
     }
 }

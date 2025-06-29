@@ -1,21 +1,12 @@
 use std::path::{Path, PathBuf};
-use serde::Deserialize;
 use std::fs;
+
+use crate::config::Config;
 
 // Converts a u16 port number to network byte order (big endian)
 // htons = "host to network short"
 pub fn htons(port: u16) -> u16 {
     port.to_be()
-}
-
-/*
-#[derive(Deserialize)] is a Rust attribute macro that tells the compiler to automatically
-generate code to allow a struct to be deserialized — in this case, from a format like TOML,
-JSON, YAML, etc. Used to load structured data (like TOML) into Rust structs.
-*/
-#[derive(Deserialize)]
-struct Config {
-    root_directory: String,
 }
 
 /*

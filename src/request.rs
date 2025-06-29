@@ -3,6 +3,7 @@ pub struct Request {
     pub method: String,
     pub path: String,
     pub version: String,
+    pub keep_alive: bool,
 }
 
 // Parses a raw HTTP request buffer into a Request struct.
@@ -29,6 +30,7 @@ pub fn parse_request(buffer: &[u8]) -> Option<Request> {
     // The first line typically looks like: "GET /index.html HTTP/1.1"
     let mut lines = request_str.lines();
 
+
     // The first line is the request line: METHOD PATH VERSION
     /*
     Explanation of Some
@@ -50,8 +52,18 @@ pub fn parse_request(buffer: &[u8]) -> Option<Request> {
         let path = parts.next()?.to_string();
         let version = parts.next()?.to_string();
 
+        let mut keep_alive: bool = false;
+        for line in lines {
+            if let Some(header_val) = line.strip_prefix("Connection:") {
+                keep_alive = header_val.trim().eq_ignore_ascii_case("keep-alive");
+            }
+
+            if line.is_empty() {
+                break; // reached the end of headers
+            }
+        }
         // Return a populated Request struct if successful.
-        return Some(Request { method, path, version });
+        return Some(Request { method, path, version, keep_alive });
     }
 
     /*

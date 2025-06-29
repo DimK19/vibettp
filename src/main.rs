@@ -4,6 +4,7 @@ mod util;
 mod response;
 mod request;
 mod handlers;
+mod config;
 
 use winsock::run_server;
 
