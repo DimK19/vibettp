@@ -9,4 +9,5 @@ JSON, YAML, etc. Used to load structured data (like TOML) into Rust structs.
 pub struct Config {
     pub root_directory: String,
     pub keep_alive: bool,
+    pub timeout_seconds: u64,
 }

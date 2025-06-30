@@ -14,6 +14,7 @@ use windows_sys::Win32::Networking::WinSock::{
     socket, bind, listen, accept, recv, send, closesocket,
     INVALID_SOCKET, SOCKET_ERROR,
     AF_INET, SOCK_STREAM, IPPROTO_TCP, SOMAXCONN,
+    FD_SET, TIMEVAL, select,
 };
 
 // Import a helper function from http.rs that builds a static HTTP response.
@@ -151,8 +152,7 @@ pub fn run_server() {
             if client_sock == INVALID_SOCKET {
                 eprintln!("Accept failed");
                 closesocket(sock);
-                WSACleanup();
-                return;
+                break;
             }
 
             println!("📡 Client connected.");
@@ -164,6 +164,53 @@ pub fn run_server() {
                 // Create a 8196-byte raw buffer to receive data from the incoming request.
                 let mut buffer = [0u8; MAX_REQUEST_SIZE];
 
+                // Check if the socket is ready for reading with a timeout
+                /*
+                Initialize an empty FD_SET struct (file descriptor set) with all values set to 0.
+                This will hold the list of sockets to monitor using select().
+                */
+                let mut fds = FD_SET {
+                    fd_count: 1,
+                    fd_array: [client_sock; 64], // fill first element, rest zeroed
+                };
+
+                /*
+                Construct a TIMEVAL struct, which defines the timeout duration.
+                tv_sec: seconds
+                tv_usec: microseconds
+                */
+                let mut timeout = TIMEVAL {
+                    tv_sec: config.timeout_seconds as i32,
+                    tv_usec: 0,
+                };
+
+                /*
+                Call select() to block either until at least one socket in fds is ready to read,
+                or until the timeout occurs
+                Parameters:
+                0: Ignored in WinSock, used in Unix to indicate max socket + 1
+                &mut fds: monitor for read
+                null_mut(): no write monitoring
+                null_mut(): no exception monitoring
+                &mut timeout: how long to wait
+                */
+                let ready = select(0, &mut fds, null_mut(), null_mut(), &mut timeout);
+
+                /*
+                If select() returns 0, that means timeout - no socket ready within the timeout.
+                If select() returns -1, it means an error occurred.
+                Break the client loop and close the connection.
+                */
+                if ready == 0 {
+                    println!("⏱️ Timeout waiting for client data.");
+                    break 'client_loop;
+                }
+                else if ready == SOCKET_ERROR {
+                    eprintln!("❌ select() failed.");
+                    break 'client_loop;
+                }
+
+                // If select() indicates the socket is ready, proceed to call recv() safely.
                 // Read bytes into the buffer from the client socket.
                 // Returns the number of bytes read.
                 let bytes_received = recv(
