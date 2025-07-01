@@ -24,3 +24,7 @@ pub fn method_not_allowed() -> Vec<u8> {
 pub fn content_too_large() -> Vec<u8> {
     build_response(413, "Content Too Large", "text/plain", "413 Content Too Large")
 }
+
+pub fn service_unavailable() -> Vec<u8> {
+    build_response(503, "Service Unavailable", "text/plain", "503 Service Unavailable")
+}

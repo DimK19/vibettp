@@ -10,4 +10,7 @@ pub struct Config {
     pub root_directory: String,
     pub keep_alive: bool,
     pub timeout_seconds: u64,
+    pub max_clients: usize,
+    pub bind_address: String,
+    pub port: u16,
 }
