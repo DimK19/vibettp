@@ -385,7 +385,7 @@ pub fn run_server() {
                             else if let Some(safe_path) = sanitize_path(&req.path) {
                                 if let Ok(contents) = std::fs::read(&safe_path) {
                                     let body = std::str::from_utf8(&contents).unwrap_or("Invalid UTF-8 in file");
-                                    let response = build_response(200, "OK", "text/html", body);
+                                    let response = handlers::file(body);
                                     send(
                                         client_sock,
                                         response.as_ptr(),
@@ -434,7 +434,7 @@ pub fn run_server() {
 
                 closesocket(client_sock);
                 println!("🔌 Connection closed.\n");
-                
+
                 // Atomically decrements the number of active clients when this thread is done.
                 active_clients.fetch_sub(1, Ordering::SeqCst);
             });

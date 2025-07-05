@@ -1,3 +1,14 @@
+#[repr(u16)]
+#[derive(Copy, Clone, Debug)]
+pub enum HTTPStatus {
+    Ok = 200,
+    BadRequest = 400,
+    NotFound = 404,
+    MethodNotAllowed = 405,
+    ContentTooLarge = 413,
+    ServiceUnavailable = 503
+}
+
 /*
 Build a full HTTP response from a status line and body string.
 
@@ -11,7 +22,7 @@ Build a full HTTP response from a status line and body string.
 * A `String` representing the complete HTTP response to be sent to the client.
 */
 pub fn build_response(
-    status_code: u16,
+    status_code: HTTPStatus,
     reason_phrase: &str,
     content_type: &str,
     body: &str
@@ -19,7 +30,7 @@ pub fn build_response(
     // Compose the HTTP response headers and body
     let response = format!(
         "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nContent-Type: {}\r\n\r\n{}",
-        status_code,
+        status_code as u16, // cast to int instead of implementing ‘Display’ trait for the enum (something like repr)
         reason_phrase,
         body.len(),
         content_type,
