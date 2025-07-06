@@ -64,10 +64,12 @@ bind_address = "127.0.0.1"
 port = 7878
 ```
 
-### Usage Notes
+### 🖋️ Usage Notes
 
 Server listens only on the configured IP and port.
 
-### Acknowledgements 🤖
+### 🤖 Acknowledgements
 Major assistance provided by ChatGPT (GPT-4.5, July 2025) - used extensively for FFI bindings, concurrency design, architecture, and code comments.
 
+### 📖 Bibliography
+Blandy, Jim, et al. _Programming Rust_. Sebastopol: O'Reilly, 2021. Print.
