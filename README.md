@@ -72,4 +72,4 @@ Server listens only on the configured IP and port.
 Major assistance provided by ChatGPT (GPT-4.5, July 2025) - used extensively for FFI bindings, concurrency design, architecture, and code comments.
 
 ### 📖 Bibliography
-Blandy, Jim, et al. _Programming Rust_. Sebastopol: O'Reilly, 2021. Print.
+Blandy, Jim, et al. _Programming Rust_. Sebastopol: O'Reilly, 2021.
