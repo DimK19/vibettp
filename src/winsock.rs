@@ -20,7 +20,7 @@ use windows_sys::Win32::Networking::WinSock::{
 };
 
 // Import a helper function from http.rs that builds a static HTTP response.
-use crate::response::build_response;
+// use crate::response::build_response;
 
 // Import a helper from util.rs to convert a port number to network byte order (required by WinSock).
 use crate::util::{htons, sanitize_path};
@@ -96,7 +96,7 @@ pub fn run_server() {
           little-endian integer. S_addr: the actual IPv4 address field.
         - Padding to match C layout. Must be zeroed.
         */
-        let mut addr_in = SOCKADDR_IN {
+        let addr_in = SOCKADDR_IN {
             sin_family: AF_INET as u16,
             sin_port: htons(config.port), // convert to network byte order
             sin_addr: IN_ADDR {
