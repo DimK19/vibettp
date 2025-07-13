@@ -13,8 +13,8 @@ use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 // use windows_sys::Win32::Networking::WinSock::*;
 use windows_sys::Win32::Networking::WinSock::{
     WSACleanup, WSAStartup, WSADATA, SOCKADDR, SOCKADDR_IN, IN_ADDR, IN_ADDR_0,
-    socket, bind, listen, accept, recv, send, closesocket,
-    INVALID_SOCKET, SOCKET_ERROR,
+    socket, bind, listen, accept, recv, send, closesocket, shutdown,
+    INVALID_SOCKET, SOCKET_ERROR, SD_SEND,
     AF_INET, SOCK_STREAM, IPPROTO_TCP, SOMAXCONN,
     FD_SET, TIMEVAL, select,
 };
@@ -195,6 +195,8 @@ pub fn run_server() {
                     response.len() as i32,
                     0,
                 );
+                // For explanation see comment on line 330 (similar case).
+                shutdown(client_sock, SD_SEND);
                 closesocket(client_sock);
                 continue;
             }
@@ -323,6 +325,30 @@ pub fn run_server() {
                             response.len() as i32,
                             0,
                         );
+
+                        /*
+                        “Gracefully” shut down the write side of the socket after sending the
+                        response, so that the client can finish reading before the connection
+                        is torn down. This helps pass the test and the client actually sees the
+                        response. Shutdown would happen regardless after breaking.
+                        Otherwise, the following error would occur:
+
+                        “thread 'test_413' panicked at tests\common.rs:16:42:
+                        called `Result::unwrap()` on an `Err` value: Os { code: 10054, kind:
+                        ConnectionReset, message: "An existing connection was forcibly closed by
+                        the remote host." }”
+
+                        (It means the server closed the TCP connection abruptly before the client
+                        finished reading the response. This is expected when handling
+                        payload-too-large (413) by immediately rejecting the request and closing
+                        the socket).
+
+                        - shutdown() is a syscall from WinSock to partially close a socket.
+                        - SD_SEND is a constant (value 1) telling it to close just the sending side.
+                        - Using raw sockets, not TcpStream which has std::net::Shutdown::Write.
+                        */
+                        shutdown(client_sock, SD_SEND);
+
                         break 'client_loop;
                     }
 
