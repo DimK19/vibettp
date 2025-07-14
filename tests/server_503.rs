@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::Duration;
 use std::net::TcpStream;
-use std::io::{Read, Write};
+use std::io::Write;
 
 mod common;
 

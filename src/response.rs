@@ -40,3 +40,15 @@ pub fn build_response(
     // Return response as bytes for sending
     return response.into_bytes();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_response_formatting() {
+        let resp = build_response(HTTPStatus::Ok, "OK", "text/html", "200 OK");
+        let text = String::from_utf8_lossy(&resp);
+        assert!(text.contains("200 OK"));
+    }
+}

@@ -1,9 +1,6 @@
-use std::thread;
-use std::time::Duration;
-
 mod common;
+use common::{send_request};
 
-use common::{send_request, SERVER_ADDR};
 /*
 Tests using Rust’s built-in #[test] attribute are executed in parallel by default (via cargo test).
 */
