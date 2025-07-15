@@ -64,12 +64,28 @@ bind_address = "127.0.0.1"
 port = 7878
 ```
 
-### 🖋️ Usage Notes
+## 🧪 Testing
+This project includes both integration tests and unit tests to ensure the server behaves correctly under various conditions.
+- **Integration Tests (Functional Server Behaviour)**
+  
+  These tests simulate real-world HTTP requests and validate the server’s responses across all supported scenarios. They are located in `tests/` and can be run via:
+  ```shell
+  cargo test
+  ```
+  or each file separately, as such:
+  ```shell
+  cargo test --test server
+  ```
+  where `server` refers to `server.rs`.
+- **Unit Tests (Internal Logic Verification)**
+  
+  Unit tests verify core library behavior, such as HTTP response formatting and configuration loading. These are embedded in each module using `#[cfg(test)]` blocks.
 
+## 🖋️ Usage Notes
 Server listens only on the configured IP and port.
 
-### 🤖 Acknowledgements
+## 🤖 Acknowledgements
 Major assistance provided by ChatGPT (GPT-4.5, July 2025) - used extensively for FFI bindings, concurrency design, architecture, and code comments.
 
-### 📖 Bibliography
-Blandy, Jim, et al. _Programming Rust_. Sebastopol: O'Reilly, 2021. Print.
+## 📖 Bibliography
+Blandy, Jim, et al. _Programming Rust_. Sebastopol: O'Reilly, 2021.
