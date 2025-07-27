@@ -5,6 +5,7 @@ pub enum HTTPStatus {
     BadRequest = 400,
     NotFound = 404,
     MethodNotAllowed = 405,
+    RequestTimeout = 408,
     ContentTooLarge = 413,
     ServiceUnavailable = 503
 }

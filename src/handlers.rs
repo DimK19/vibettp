@@ -26,6 +26,10 @@ pub fn method_not_allowed() -> Vec<u8> {
     build_response(HTTPStatus::MethodNotAllowed, "Method Not Allowed", "text/plain", "405 Method Not Allowed")
 }
 
+pub fn request_timeout() -> Vec<u8> {
+    build_response(HTTPStatus::RequestTimeout, "Request Timeout", "text/plain", "408 Request Timeout")
+}
+
 pub fn content_too_large() -> Vec<u8> {
     build_response(HTTPStatus::ContentTooLarge, "Content Too Large", "text/plain", "413 Content Too Large")
 }

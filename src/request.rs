@@ -52,6 +52,11 @@ pub fn parse_request(buffer: &[u8]) -> Option<Request> {
         let path = parts.next()?.to_string();
         let version = parts.next()?.to_string();
 
+        // Partial fix for 400 Bad Request
+        if !version.starts_with("HTTP/") {
+            return None;
+        }
+
         let mut keep_alive: bool = false;
         for line in lines {
             if let Some(header_val) = line.strip_prefix("Connection:") {

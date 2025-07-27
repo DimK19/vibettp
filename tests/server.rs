@@ -18,6 +18,12 @@ fn test_400() {
 }
 
 #[test]
+fn test_400_2() {
+    let response = send_request("NOT_A_REQUEST");
+    assert!(response.contains("400 Bad Request"), "Expected 400, got:\n{}", response);
+}
+
+#[test]
 fn test_404() {
     let response = send_request("GET /test HTTP/1.1\r\nHost: localhost\r\n\r\n");
     assert!(response.contains("404 Not Found"), "Response did not contain 404:\n{}", response);

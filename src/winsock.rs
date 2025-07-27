@@ -8,6 +8,7 @@ use std::ptr::null_mut;
 use std::collections::HashMap;
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::time::Instant;
 
 // Import all constants, types, and functions from WinSock (Windows socket API) via the windows-sys crate.
 // use windows_sys::Win32::Networking::WinSock::*;
@@ -240,116 +241,167 @@ pub fn run_server() {
             */
             thread::spawn(move || {
                 // --- Begin keep-alive-aware inner loop ---
+
+                // Add a per-request temporal deadline
+                let start_time = Instant::now();
+
                 'client_loop: loop {
                     // Create a 8196-byte raw buffer to receive data from the incoming request.
                     let mut buffer = [0u8; MAX_REQUEST_SIZE];
 
-                    // Check if the socket is ready for reading with a timeout
-                    /*
-                    Initialize an empty FD_SET struct (file descriptor set) with all values set to 0.
-                    This will hold the list of sockets to monitor using select().
-                    */
-                    let mut fds = FD_SET {
-                        fd_count: 1,
-                        fd_array: [client_sock; 64], // fill first element, rest zeroed
-                    };
-
-                    /*
-                    Construct a TIMEVAL struct, which defines the timeout duration.
-                    tv_sec: seconds
-                    tv_usec: microseconds
-                    */
-                    let mut timeout = TIMEVAL {
-                        tv_sec: config.timeout_seconds as i32,
-                        tv_usec: 0,
-                    };
-
-                    /*
-                    Call select() to block either until at least one socket in fds is ready to read,
-                    or until the timeout occurs
-                    Parameters:
-                    0: Ignored in WinSock, used in Unix to indicate max socket + 1
-                    &mut fds: monitor for read
-                    null_mut(): no write monitoring
-                    null_mut(): no exception monitoring
-                    &mut timeout: how long to wait
-                    */
-                    let ready = select(0, &mut fds, null_mut(), null_mut(), &mut timeout);
-
-                    /*
-                    If select() returns 0, that means timeout - no socket ready within the timeout.
-                    If select() returns -1, it means an error occurred.
-                    Break the client loop and close the connection.
-                    */
-                    if ready == 0 {
-                        println!("⏱️ Timeout waiting for client data.");
-                        break 'client_loop;
-                    }
-                    else if ready == SOCKET_ERROR {
-                        eprintln!("❌ select() failed.");
-                        break 'client_loop;
-                    }
-
-                    // If select() indicates the socket is ready, proceed to call recv() safely.
-                    // Read bytes into the buffer from the client socket.
-                    // Returns the number of bytes read.
-                    let bytes_received = recv(
-                        client_sock,
-                        buffer.as_mut_ptr(),
-                        buffer.len() as i32,
-                        0,
-                    );
                     let mut keep_alive_requested: bool = false;
 
-                    /*
-                    recv() pulls up to N bytes (N is the buffer size, in this case 8196).
-                    If the client sent more, the first N bytes are copied into the buffer, and the
-                    remaining data stays queued in the socket’s internal receive buffer, managed by the
-                    operating system. This data will be returned by the next recv() call.
+                    // Buffer to accumulate partial requests
+                    let mut request_data = Vec::new();
 
-                    Where is that data exactly?
-                    The OS keeps a receive queue (buffer) per socket. It typically has a size limit
-                    (e.g., 64KB or more depending on OS settings). Until you call recv() again, the data
-                    sits there. If you never call recv() again and just close the socket, the OS drops the
-                    remaining data.
-                    */
+                    loop {
+                        // Check if the socket is ready for reading with a timeout
+                        /*
+                        Initialize an empty FD_SET struct (file descriptor set) with all values set to 0.
+                        This will hold the list of sockets to monitor using select().
+                        */
+                        let mut fds = FD_SET {
+                            fd_count: 1,
+                            fd_array: [client_sock; 64], // fill first element, rest zeroed
+                        };
 
-                    // Impose limit on request size
-                    if bytes_received == MAX_REQUEST_SIZE as i32 {
-                        // Suspicious: buffer is completely full
-                        // Could mean there is more data — reject just to be safe
-                        let response = handlers::content_too_large();
-                        send(
+                        /*
+                        Construct a TIMEVAL struct, which defines the timeout duration.
+                        tv_sec: seconds
+                        tv_usec: microseconds
+                        */
+                        let mut timeout = TIMEVAL {
+                            tv_sec: config.timeout_seconds as i32,
+                            tv_usec: 0,
+                        };
+
+                        /*
+                        Call select() to block either until at least one socket in fds is ready to read,
+                        or until the timeout occurs
+                        Parameters:
+                        0: Ignored in WinSock, used in Unix to indicate max socket + 1
+                        &mut fds: monitor for read
+                        null_mut(): no write monitoring
+                        null_mut(): no exception monitoring
+                        &mut timeout: how long to wait
+                        */
+                        let ready = select(0, &mut fds, null_mut(), null_mut(), &mut timeout);
+
+                        /*
+                        If select() returns 0, that means timeout - no socket ready within the timeout.
+                        If select() returns -1, it means an error occurred.
+                        Break the client loop and close the connection.
+                        */
+                        if ready == 0 {
+                            println!("⏱️ Timeout waiting for client data.");
+                            let response = handlers::request_timeout();
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0
+                            );
+                            break 'client_loop;
+                        }
+                        else if ready == SOCKET_ERROR {
+                            eprintln!("❌ select() failed.");
+                            break 'client_loop;
+                        }
+
+                        // Check elapsed time
+                        if start_time.elapsed().as_secs() > config.timeout_seconds as u64 {
+                            println!("⏱️ Client took too long to send full request.");
+                            break 'client_loop;
+                        }
+
+                        // If select() indicates the socket is ready, proceed to call recv() safely.
+                        // Read bytes into the buffer from the client socket.
+                        // Returns the number of bytes read.
+                        let bytes_received = recv(
                             client_sock,
-                            response.as_ptr(),
-                            response.len() as i32,
+                            buffer.as_mut_ptr(),
+                            buffer.len() as i32,
                             0,
                         );
 
+                        if bytes_received <= 0 {
+                            let response = handlers::bad_request();
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0
+                            );
+                            println!("🔌 Client disconnected.");
+                            break 'client_loop;
+                        }
+
+                        request_data.extend_from_slice(&buffer[..bytes_received as usize]);
+
                         /*
-                        “Gracefully” shut down the write side of the socket after sending the
-                        response, so that the client can finish reading before the connection
-                        is torn down. This helps pass the test and the client actually sees the
-                        response. Shutdown would happen regardless after breaking.
-                        Otherwise, the following error would occur:
+                        recv() pulls up to N bytes (N is the buffer size, in this case 8196).
+                        If the client sent more, the first N bytes are copied into the buffer, and the
+                        remaining data stays queued in the socket’s internal receive buffer, managed by the
+                        operating system. This data will be returned by the next recv() call.
 
-                        “thread 'test_413' panicked at tests\common.rs:16:42:
-                        called `Result::unwrap()` on an `Err` value: Os { code: 10054, kind:
-                        ConnectionReset, message: "An existing connection was forcibly closed by
-                        the remote host." }”
-
-                        (It means the server closed the TCP connection abruptly before the client
-                        finished reading the response. This is expected when handling
-                        payload-too-large (413) by immediately rejecting the request and closing
-                        the socket).
-
-                        - shutdown() is a syscall from WinSock to partially close a socket.
-                        - SD_SEND is a constant (value 1) telling it to close just the sending side.
-                        - Using raw sockets, not TcpStream which has std::net::Shutdown::Write.
+                        Where is that data exactly?
+                        The OS keeps a receive queue (buffer) per socket. It typically has a size limit
+                        (e.g., 64KB or more depending on OS settings). Until you call recv() again, the data
+                        sits there. If you never call recv() again and just close the socket, the OS drops the
+                        remaining data.
                         */
-                        shutdown(client_sock, SD_SEND);
 
-                        break 'client_loop;
+                        // Impose limit on request size
+                        if request_data.len() >= MAX_REQUEST_SIZE {
+                            let response = handlers::content_too_large();
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0,
+                            );
+
+                            /*
+                            “Gracefully” shut down the write side of the socket after sending the
+                            response, so that the client can finish reading before the connection
+                            is torn down. This helps pass the test and the client actually sees the
+                            response. Shutdown would happen regardless after breaking.
+                            Otherwise, the following error would occur:
+
+                            “thread 'test_413' panicked at tests\common.rs:16:42:
+                            called `Result::unwrap()` on an `Err` value: Os { code: 10054, kind:
+                            ConnectionReset, message: "An existing connection was forcibly closed by
+                            the remote host." }”
+
+                            (It means the server closed the TCP connection abruptly before the client
+                            finished reading the response. This is expected when handling
+                            payload-too-large (413) by immediately rejecting the request and closing
+                            the socket).
+
+                            - shutdown() is a syscall from WinSock to partially close a socket.
+                            - SD_SEND is a constant (value 1) telling it to close just the sending side.
+                            - Using raw sockets, not TcpStream which has std::net::Shutdown::Write.
+                            */
+                            shutdown(client_sock, SD_SEND);
+
+                            break 'client_loop;
+                        }
+
+                        // Only try parsing once we have complete headers
+                        /*
+                        - .windows(4): This creates an iterator that returns overlapping slices
+                        (windows) of 4 bytes from request_data.
+                        - .any(...): An iterator method that returns true if any element of the
+                        iterator satisfies the predicate.
+                        - |w| w == b"\r\n\r\n": This is the closure (anonymous function) that takes
+                        a window w and checks if it equals the byte string b"\r\n\r\n".
+
+                        This approach searches for the 4-byte pattern anywhere in the buffer. It
+                        works correctly even if \r\n\r\n is in the middle of the buffer.
+                        */
+                        if request_data.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break; // Found end of headers
+                        }
                     }
 
                     /*
@@ -360,90 +412,87 @@ pub fn run_server() {
                     | Trust Content-Length header   | Dangerous     | Headers can lie or be omitted       |
                     */
 
-                    // If data was received, decode and print the raw HTTP request from the client.
-                    if bytes_received > 0 {
-                        // Convert request to string, parse, and print it
-                        // Print the raw request for inspection.
-                        let request_data = &buffer[..bytes_received as usize];
+                    // Decode and print the raw HTTP request from the client.
+                    // Convert request to string, parse, and print it
+                    // Print the raw request for inspection.
+                    println!(
+                        "🔍 Raw request:\n{}",
+                        String::from_utf8_lossy(&request_data)
+                    );
+
+                    println!("Before parse request");
+                    if let Some(req) = parse_request(&request_data) {
+                        // --- Step 8: Build and send HTTP response ---
+
                         println!(
-                            "🔍 Raw request:\n{}",
-                            String::from_utf8_lossy(request_data)
+                            "📠 HTTP Version: {} Method: {}, Path: {}",
+                            req.version, req.method, req.path
                         );
 
+                        keep_alive_requested = req.keep_alive;
 
-                        if let Some(req) = parse_request(request_data) {
-                            // --- Step 8: Build and send HTTP response ---
-
-                            println!(
-                                "📠 HTTP Version: {} Method: {}, Path: {}",
-                                req.version, req.method, req.path
+                        // Block disallowed methods
+                        if req.method.as_str() != "GET" && req.method.as_str() != "POST" {
+                            let response = handlers::method_not_allowed();
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0,
                             );
+                            break 'client_loop;
+                        }
 
-                            keep_alive_requested = req.keep_alive;
+                        // Try route match first
+                        // Get the appropriate handler function
+                        if let Some(handler) = routes.get(req.path.as_str()) {
+                            // Create the HTTP response body using the helper function.
+                            let response = handler();
 
-                            // Block disallowed methods
-                            if req.method.as_str() != "GET" && req.method.as_str() != "POST" {
-                                let response = handlers::method_not_allowed();
+                            // Send the response over the client socket.
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0,
+                            );
+                        }
+                        // Fallback to static file serving
+                        else if let Some(safe_path) = sanitize_path(&req.path) {
+                            if let Ok(contents) = std::fs::read(&safe_path) {
+                                let body = std::str::from_utf8(&contents).unwrap_or("Invalid UTF-8 in file");
+                                let response = handlers::file(body);
                                 send(
                                     client_sock,
                                     response.as_ptr(),
                                     response.len() as i32,
                                     0,
                                 );
-                                break 'client_loop;
                             }
-
-                            // Try route match first
-                            // Get the appropriate handler function
-                            if let Some(handler) = routes.get(req.path.as_str()) {
-                                // Create the HTTP response body using the helper function.
-                                let response = handler();
-
-                                // Send the response over the client socket.
-                                send(
-                                    client_sock,
-                                    response.as_ptr(),
-                                    response.len() as i32,
-                                    0,
-                                );
-                            }
-                            // Fallback to static file serving
-                            else if let Some(safe_path) = sanitize_path(&req.path) {
-                                if let Ok(contents) = std::fs::read(&safe_path) {
-                                    let body = std::str::from_utf8(&contents).unwrap_or("Invalid UTF-8 in file");
-                                    let response = handlers::file(body);
-                                    send(
-                                        client_sock,
-                                        response.as_ptr(),
-                                        response.len() as i32,
-                                        0,
-                                    );
-                                }
-                                else {
-                                    let response = handlers::not_found();
-                                    send(
-                                        client_sock,
-                                        response.as_ptr(),
-                                        response.len() as i32,
-                                        0,
-                                    );
-                                }
-                            }
-                            // Malicious path or error
                             else {
-                                let response = handlers::bad_request();
+                                let response = handlers::not_found();
                                 send(
                                     client_sock,
                                     response.as_ptr(),
                                     response.len() as i32,
                                     0
                                 );
-                                continue 'client_loop;
                             }
                         }
+                        // Malicious path or error
                         else {
-                            println!("⚠️ Failed to parse HTTP request.");
+                            let response = handlers::bad_request();
+                            send(
+                                client_sock,
+                                response.as_ptr(),
+                                response.len() as i32,
+                                0
+                            );
+                            continue 'client_loop;
                         }
+                    }
+                    else {
+                        println!("⚠️ Failed to parse HTTP request.");
                     }
 
                     // Close client connection.
