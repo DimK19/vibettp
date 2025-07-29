@@ -80,6 +80,9 @@ This project includes both integration tests and unit tests to ensure the server
 - **Unit Tests (Internal Logic Verification)**
   
   Unit tests verify core library behavior, such as HTTP response formatting and configuration loading. These are embedded in each module using `#[cfg(test)]` blocks.
+- **Slowloris Attack Simulation (Manual Stress Test)**
+
+  The Python script [`slowloris.py`](https://github.com/DimK19/vibettp/blob/master/tests/slowloris.py) simulates a Slowloris-style attack, where a client connects and deliberately sends HTTP headers very slowly to exhaust server resources. This test helps verify the server’s ability to enforce connection timeouts and reject incomplete requests.
 
 ## 🖋️ Usage Notes
 Server listens only on the configured IP and port.
